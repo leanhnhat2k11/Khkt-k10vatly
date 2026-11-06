@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Game Mô Phỏng: Hệ Thống Định Vị Chấn Động Sử Dụng Đảo Ngược Sóng Âm</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+    body { background: #0d1624; color: #e2e8f0; display: flex; height: 100vh; overflow: hidden; }
+    #sidebar {
+      width: 360px; background: #132034; padding: 18px; border-right: 1px solid #263b59;
+      display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+    }
+    h1 { font-size: 16px; color: #38bdf8; text-transform: uppercase; line-height: 1.4; }
+    .panel { background: #0d1624; border: 1px solid #263b59; border-radius: 8px; padding: 12px; }
+    .panel h2 { font-size: 13px; color: #94a3b8; margin-bottom: 8px; text-transform: uppercase; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px; }
+    input[type="number"], input[type="range"] {
+      background: #1e293b; border: 1px solid #3b82f6; color: #fff; border-radius: 4px; padding: 4px 6px; width: 90px;
+    }
+    input[type="range"] { width: 100%; margin-top: 6px; }
+    button {
+      width: 100%; padding: 9px; border: none; border-radius: 6px; font-weight: 600;
+      cursor: pointer; transition: 0.2s; margin-top: 4px; font-size: 13px;
+    }
+    .btn-primary { background: #0284c7; color: white; }
+    .btn-primary:hover { background: #0369a1; }
+    .btn-warn { background: #eab308; color: #0f172a; }
+    .btn-warn:hover { background: #ca8a04; }
+    .btn-success { background: #10b981; color: #0f172a; }
+    .sensor-tag { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+    #status-box { font-size: 13px; line-height: 1.5; color: #fde047; min-height: 44px; }
+    #canvas-container { flex: 1; position: relative; }
+    canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+    canvas:active { cursor: grabbing; }
+    #hud {
+      position: absolute; top: 14px; left: 14px; background: rgba(13, 22, 36, 0.85);
+      border: 1px solid #263b59; padding: 10px 14px; border-radius: 8px; font-size: 12px; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="sidebar">
+    <h1>Hệ thống định vị chấn động sử dụng đảo ngược sóng âm</h1>
+
+    <div class="panel">
+      <h2>1. Dữ liệu máy đo rung chấn</h2>
+      <div class="row">
+        <span><span class="sensor-tag" style="background:#f97316"></span>Máy đo D1 (Mốc t = 0):</span>
+        <strong id="t-d1">0.00 s</strong>
+      </div>
+      <div class="row">
+        <span><span class="sensor-tag" style="background:#22c55e"></span>Độ lệch Δt (D2 - D1):</span>
+        <strong id="dt-d2">--</strong>
+      </div>
+      <div class="row">
+        <span><span class="sensor-tag" style="background:#a855f7"></span>Độ lệch Δt (D3 - D1):</span>
+        <strong id="dt-d3">--</strong>
+      </div>
+      <button class="btn-primary" id="btn-new-noise">Tạo tiếng ồn K mới trong Ký túc xá</button>
+    </div>
+
+    <div class="panel">
+      <h2>2. Nhập khoảng thời gian phát ngược</h2>
+      <div class="row">
+        <label>Nhập Δt của D2:</label>
+        <input type="number" id="in-dt2" step="0.05" value="0">
+      </div>
+      <div class="row">
+        <label>Nhập Δt của D3:</label>
+        <input type="number" id="in-dt3" step="0.05" value="0">
+      </div>
+      <button class="btn-warn" id="btn-auto-fill">Tự động nạp Δt từ máy đo</button>
+      <div style="margin-top:10px; font-size:13px;">
+        <label>Tiến trình sóng phát ngược (T):</label>
+        <input type="range" id="wave-slider" min="0" max="12" step="0.05" value="0">
+      </div>
+      <button class="btn-primary" id="btn-play-wave">Phát / Dừng mô phỏng sóng ngược</button>
+    </div>
+
+    <div class="panel">
+      <h2>3. Định vị nguồn phát âm (K)</h2>
+      <div class="row">
+        <label>Dự đoán Tầng (Trục Y: 1 - 5):</label>
+        <input type="number" id="guess-floor" min="1" max="5" value="3">
+      </div>
+      <div class="row">
+        <label>Dự đoán Vị trí X (0 - 9.67):</label>
+        <input type="number" id="guess-x" min="0" max="9.67" step="0.5" value="3.5">
+      </div>
+      <button class="btn-success" id="btn-check">Xác nhận vị trí nguồn K</button>
+    </div>
+
+    <div class="panel">
+      <h2>Trạng thái hệ thống</h2>
+      <div id="status-box">Nhấn "Tạo tiếng ồn K mới" để bắt đầu thu nhận chấn động.</div>
+    </div>
+  </div>
+
+  <div id="canvas-container">
+    <canvas id="simCanvas"></canvas>
+    <div id="hud">
+      <div><strong>Mô hình Ký túc xá 3D</strong> | Trục X: 9 2/3 đơn vị (6 phòng trái, Cầu thang 5/3, 2 phòng phải) | Trục Y: 5 tầng | Trục Z: sâu 1 (z=0..1)</div>
+      <div style="color:#94a3b8; margin-top:4px;">Kéo chuột trái để xoay góc nhìn 3D • Cuộn chuột để phóng to/thu nhỏ</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Hệ trục tọa độ Ký túc xá dựa theo tài liệu:
+    // Gốc O(0,0,0) ở góc dưới bên phải, trục X hướng sang trái (0 -> 9.67), trục Y hướng lên (0 -> 5), trục Z độ sâu (0 -> 1)
+    const X_MAX = 9 + 2/3;
+    const Y_MAX = 5;
+    const Z_MAX = 1;
+    const SOUND_SPEED = 1.0;
+
+    // Tọa độ 3 máy đo rung chấn D1, D2, D3
+    const sensors = [
+      { id: 'D1', x: 0.6, y: 0.6, z: 0.5, color: '#f97316' },
+      { id: 'D2', x: 5.2, y: 0.5, z: 0.5, color: '#22c55e' },
+      { id: 'D3', x: 5.2, y: 4.3, z: 0.5, color: '#a855f7' }
+    ];
+
+    let sourceK = { x: 3.3, y: 2.3, z: 0.5, revealed: false };
+    let tArrivals = [0, 0, 0];
+    let dt2 = 0, dt3 = 0;
+    let simTime = 0;
+    let isPlaying = false;
+
+    // Góc nhìn Camera 3D
+    let rotY = 0.25, rotX = -0.15, zoom = 58;
+    let isDragging = false, lastMX = 0, lastMY = 0;
+
+    function resize() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    canvas.addEventListener('mousedown', e => { isDragging = true; lastMX = e.clientX; lastMY = e.clientY; });
+    window.addEventListener('mouseup', () => isDragging = false);
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      rotY += (e.clientX - lastMX) * 0.007;
+      rotX += (e.clientY - lastMY) * 0.007;
+      rotX = Math.max(-1.2, Math.min(1.2, rotX));
+      lastMX = e.clientX; lastMY = e.clientY;
+    });
+    canvas.addEventListener('wheel', e => {
+      zoom = Math.max(28, Math.min(110, zoom - e.deltaY * 0.04));
+    });
+
+    // Phép chiếu 3D sang 2D (Gốc O ở bên phải, X hướng sang trái giống hình trong PDF)
+    function project(x, y, z) {
+      const cx = -(x - X_MAX / 2);
+      const cy = y - Y_MAX / 2;
+      const cz = z - Z_MAX / 2;
+
+      const x1 = cx * Math.cos(rotY) - cz * Math.sin(rotY);
+      const z1 = cx * Math.sin(rotY) + cz * Math.cos(rotY);
+      const y2 = cy * Math.cos(rotX) - z1 * Math.sin(rotX);
+      const z2 = cy * Math.sin(rotX) + z1 * Math.cos(rotX);
+
+      const fov = 18;
+      const scale = (fov / (fov + z2)) * zoom;
+      return {
+        px: canvas.width / 2 + x1 * scale,
+        py: canvas.height / 2 - y2 * scale,
+        scale: scale
+      };
+    }
+
+    function drawLine3D(p1, p2, color, width = 1) {
+      const a = project(p1.x, p1.y, p1.z);
+      const b = project(p2.x, p2.y, p2.z);
+      ctx.beginPath();
+      ctx.moveTo(a.px, a.py);
+      ctx.lineTo(b.px, b.py);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    }
+
+    function drawWireSphere(center, radius, color, highlightIntersection = false) {
+      if (radius <= 0.05) return;
+      const rings = 7;
+      const segs = 28;
+      // Vẽ các vòng vĩ tuyến
+      for (let r = 1; r < rings; r++) {
+        const phi = (r / rings) * Math.PI;
+        const yOff = radius * Math.cos(phi);
+        const rRing = radius * Math.sin(phi);
+        ctx.beginPath();
+        for (let s = 0; s <= segs; s++) {
+          const theta = (s / segs) * Math.PI * 2;
+          const px = center.x + rRing * Math.cos(theta);
+          const py = center.y + yOff;
+          const pz = center.z + rRing * Math.sin(theta);
+          const pt = project(px, py, pz);
+          if (s === 0) ctx.moveTo(pt.px, pt.py);
+          else ctx.lineTo(pt.px, pt.py);
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+      }
+      // Vẽ các vòng kinh tuyến
+      for (let m = 0; m < 6; m++) {
+        const theta = (m / 6) * Math.PI;
+        ctx.beginPath();
+        for (let s = 0; s <= segs; s++) {
+          const phi = (s / segs) * Math.PI * 2;
+          const px = center.x + radius * Math.sin(phi) * Math.cos(theta);
+          const py = center.y + radius * Math.cos(phi);
+          const pz = center.z + radius * Math.sin(phi) * Math.sin(theta);
+          const pt = project(px, py, pz);
+          if (s === 0) ctx.moveTo(pt.px, pt.py);
+          else ctx.lineTo(pt.px, pt.py);
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+      }
+    }
+
+    function generateNewNoise() {
+      sourceK.x = +(1.0 + Math.random() * 7.8).toFixed(2);
+      sourceK.y = +(0.5 + Math.random() * 4.0).toFixed(2);
+      sourceK.z = 0.5;
+      sourceK.revealed = false;
+
+      tArrivals = sensors.map(s => {
+        const d = Math.hypot(s.x - sourceK.x, s.y - sourceK.y, s.z - sourceK.z);
+        return d / SOUND_SPEED;
+      });
+
+      dt2 = +(tArrivals[1] - tArrivals[0]).toFixed(2);
+      dt3 = +(tArrivals[2] - tArrivals[0]).toFixed(2);
+
+      document.getElementById('dt-d2').textContent = (dt2 >= 0 ? '+' : '') + dt2 + ' s';
+      document.getElementById('dt-d3').textContent = (dt3 >= 0 ? '+' : '') + dt3 + ' s';
+      document.getElementById('status-box').textContent =
+        'Đã ghi nhận chấn động! Hãy nạp Δt và kéo thanh thời gian để tìm giao điểm màu vàng của 3 mặt cầu sóng.';
+    }
+
+    document.getElementById('btn-new-noise').addEventListener('click', generateNewNoise);
+
+    document.getElementById('btn-auto-fill').addEventListener('click', () => {
+      document.getElementById('in-dt2').value = dt2;
+      document.getElementById('in-dt3').value = dt3;
+      // Đặt thanh trượt gần vùng giao thoa để dễ quan sát
+      simTime = tArrivals[0];
+      document.getElementById('wave-slider').value = simTime;
+      document.getElementById('status-box').textContent =
+        'Đã nạp Δt chuẩn và đưa sóng phát ngược về thời điểm giao thoa! Hãy quan sát điểm sáng vàng K.';
+    });
+
+    document.getElementById('wave-slider').addEventListener('input', e => {
+      simTime = parseFloat(e.target.value);
+    });
+
+    document.getElementById('btn-play-wave').addEventListener('click', () => {
+      isPlaying = !isPlaying;
+    });
+
+    document.getElementById('btn-check').addEventListener('click', () => {
+      const gFloor = parseInt(document.getElementById('guess-floor').value, 10);
+      const gX = parseFloat(document.getElementById('guess-x').value);
+      const trueFloor = Math.min(5, Math.max(1, Math.ceil(sourceK.y)));
+      const errX = Math.abs(gX - sourceK.x);
+
+      sourceK.revealed = true;
+      if (gFloor === trueFloor && errX <= 1.2) {
+        document.getElementById('status-box').innerHTML =
+          `CHÍNH XÁC! Nguồn phát K nằm tại <strong>Tầng ${trueFloor} (X = ${sourceK.x}, Y = ${sourceK.y})</strong>.`;
+      } else {
+        document.getElementById('status-box').innerHTML =
+          `Chưa khớp! Nguồn K thực tế nằm ở <strong>Tầng ${trueFloor} (X = ${sourceK.x}, Y = ${sourceK.y})</strong>. Hãy bấm "Tự động nạp Δt" để xem điểm giao nhau.`;
+      }
+    });
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 1. Vẽ khung lưới 3D của Ký túc xá (5 tầng, mặt trước z=1, mặt sau z=0)
+      for (let z of [0, 1]) {
+        const col = z === 1 ? 'rgba(148, 163, 184, 0.45)' : 'rgba(71, 85, 105, 0.35)';
+        for (let y = 0; y <= Y_MAX; y++) {
+          drawLine3D({ x: 0, y, z }, { x: X_MAX, y, z }, col, 1);
+        }
+        // Vách ngăn 6 phòng bên trái (0 -> 6), Cầu thang 5/3 (6 -> 7.67), 2 phòng bên phải (7.67 -> 9.67)
+        const xWalls = [0, 1, 2, 3, 4, 5, 6, 7.67, 8.67, X_MAX];
+        for (let x of xWalls) {
+          drawLine3D({ x, y: 0, z }, { x, y: Y_MAX, z }, col, 1);
+        }
+      }
+
+      // Nối độ sâu Z
+      for (let y = 0; y <= Y_MAX; y += 5) {
+        for (let x of [0, 6, 7.67, X_MAX]) {
+          drawLine3D({ x, y, z: 0 }, { x, y, z: 1 }, 'rgba(148, 163, 184, 0.3)', 1);
+        }
+      }
+
+      // Vẽ bậc cầu thang ở khu vực X: 6 -> 7.67
+      for (let f = 0; f < 5; f++) {
+        for (let s = 0; s < 4; s++) {
+          const sx1 = 6 + (s / 4) * 1.67;
+          const sx2 = 6 + ((s + 1) / 4) * 1.67;
+          const sy1 = f + (s / 4);
+          const sy2 = f + ((s + 1) / 4);
+          drawLine3D({ x: sx1, y: sy1, z: 0.5 }, { x: sx2, y: sy1, z: 0.5 }, '#b45309', 1.5);
+          drawLine3D({ x: sx2, y: sy1, z: 0.5 }, { x: sx2, y: sy2, z: 0.5 }, '#b45309', 1.5);
+        }
+      }
+
+      // 2. Vẽ hệ trục tọa độ O(0,0,0), X (đỏ), Y (xanh lá), Z (xanh dương)
+      drawLine3D({ x: 0, y: 0, z: 0 }, { x: X_MAX + 0.8, y: 0, z: 0 }, '#f87171', 2.5);
+      drawLine3D({ x: 0, y: 0, z: 0 }, { x: 0, y: Y_MAX + 0.6, z: 0 }, '#4ade80', 2.5);
+      drawLine3D({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: Z_MAX + 1.2 }, '#60a5fa', 2.5);
+
+      const oPt = project(0, 0, 0);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText('O (0,0,0)', oPt.px + 8, oPt.py + 14);
+
+      // Nhãn khu vực Ký túc xá
+      const lblLeft = project(3, 5.2, 0.5);
+      const lblStair = project(6.8, 5.2, 0.5);
+      const lblRight = project(8.6, 5.2, 0.5);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('6 PHÒNG BÊN TRÁI', lblLeft.px - 45, lblLeft.py);
+      ctx.fillText('CẦU THANG 5/3', lblStair.px - 40, lblStair.py);
+      ctx.fillText('2 PHÒNG BÊN PHẢI', lblRight.px - 45, lblRight.py);
+
+      // 3. Tính bán kính sóng phát ngược từ D1, D2, D3 dựa trên Δt người chơi nhập
+      const userDt2 = parseFloat(document.getElementById('in-dt2').value) || 0;
+      const userDt3 = parseFloat(document.getElementById('in-dt3').value) || 0;
+
+      // Khi đảo ngược thời gian: máy nào nhận sóng muộn hơn (Δt > 0) sẽ có bán kính sóng ngược tương ứng để hội tụ cùng lúc tại K
+      const r1 = Math.max(0, simTime * SOUND_SPEED);
+      const r2 = Math.max(0, (simTime + userDt2) * SOUND_SPEED);
+      const r3 = Math.max(0, (simTime + userDt3) * SOUND_SPEED);
+      const radii = [r1, r2, r3];
+
+      sensors.forEach((s, idx) => {
+        drawWireSphere(s, radii[idx], s.color + '88');
+        const sp = project(s.x, s.y, s.z);
+        ctx.beginPath();
+        ctx.arc(sp.px, sp.py, 7, 0, Math.PI * 2);
+        ctx.fillStyle = s.color;
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(s.id, sp.px + 10, sp.py - 6);
+      });
+
+      // 4. Kiểm tra vùng giao nhau của 3 mặt cầu sóng phát ngược để tạo vệt sáng vàng (K)
+      const d1K = Math.abs(r1 - Math.hypot(sensors[0].x - sourceK.x, sensors[0].y - sourceK.y, sensors[0].z - sourceK.z));
+      const d2K = Math.abs(r2 - Math.hypot(sensors[1].x - sourceK.x, sensors[1].y - sourceK.y, sensors[1].z - sourceK.z));
+      const d3K = Math.abs(r3 - Math.hypot(sensors[2].x - sourceK.x, sensors[2].y - sourceK.y, sensors[2].z - sourceK.z));
+
+      const maxDiff = Math.max(d1K, d2K, d3K);
+      if (maxDiff < 0.45 || sourceK.revealed) {
+        const kp = project(sourceK.x, sourceK.y, sourceK.z);
+        const alpha = sourceK.revealed ? 1 : Math.max(0.2, 1 - maxDiff / 0.45);
+        const grad = ctx.createRadialGradient(kp.px, kp.py, 2, kp.px, kp.py, 24);
+        grad.addColorStop(0, `rgba(253, 224, 71, ${alpha})`);
+        grad.addColorStop(1, 'rgba(253, 224, 71, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(kp.px, kp.py, 24, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(kp.px, kp.py, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#fde047';
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText('K', kp.px + 9, kp.py - 8);
+      }
+
+      if (isPlaying) {
+        simTime += 0.03;
+        if (simTime > 10) simTime = 0;
+        document.getElementById('wave-slider').value = simTime;
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    generateNewNoise();
+    render();
+  </script>
+</body>
+</html>
